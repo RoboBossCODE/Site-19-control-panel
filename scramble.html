@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>SCRAMBLE</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: white;
+    }
+
+    #app { position: fixed; inset: 0; background: #000; }
+    #camera, #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #camera {
+      object-fit: cover;
+      background: black;
+    }
+
+    #overlay {
+      pointer-events: none;
+    }
+
+    #topbar {
+      position: absolute;
+      top: max(12px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .badge {
+      background: rgba(0,0,0,.65);
+      border: 1px solid #f33;
+      color: #ff3a3a;
+      padding: 8px 10px;
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: .12em;
+      text-shadow: 0 0 10px rgba(255,0,0,.75);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    #controls {
+      position: absolute;
+      right: 12px;
+      top: max(64px, calc(env(safe-area-inset-top) + 55px));
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    button {
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid #f33;
+      color: white;
+      background: rgba(0,0,0,.75);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font: inherit;
+      font-weight: 700;
+      min-width: 120px;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    button:active { transform: scale(.98); }
+
+    #start {
+      position: absolute;
+      z-index: 20;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 220px;
+      padding: 15px 18px;
+      font-size: 16px;
+    }
+
+    #status {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      z-index: 5;
+      background: rgba(0,0,0,.72);
+      border-left: 3px solid #f33;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.4;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    
+    #boot {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: #ff3a3a;
+      font-size: 14px;
+      line-height: 1.65;
+      letter-spacing: .08em;
+      text-shadow: 0 0 10px rgba(255,0,0,.65);
+    }
+
+    #bootText {
+      width: min(92vw, 520px);
+      white-space: pre-wrap;
+    }
+
+    #hazardFlash {
+      position: absolute;
+      inset: 0;
+      z-index: 35;
+      pointer-events: none;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,0,0,.18);
+      color: white;
+      font-weight: 900;
+      font-size: clamp(22px, 6vw, 44px);
+      text-align: center;
+      letter-spacing: .08em;
+      text-shadow: 0 0 16px #000, 0 0 28px #f00;
+    }
+
+    #hazardFlash.show { display: flex; }
+
+    #targetHint {
+      position: absolute;
+      left: 12px;
+      top: max(64px, calc(env(safe-area-inset-top) + 55px));
+      z-index: 12;
+      background: rgba(0,0,0,.72);
+      border: 1px solid #f33;
+      padding: 8px 10px;
+      font-size: 11px;
+      max-width: 56vw;
+      pointer-events: none;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="boot"><div id="bootText"></div></div>
+  <div id="hazardFlash">COGNITOHAZARD DETECTED</div>
+  <video id="camera" autoplay muted playsinline></video>
+  <canvas id="overlay"></canvas>
+
+  <div id="topbar">
+    <div class="badge">SCRAMBLE // iOS</div>
+  </div>
+
+  <div id="controls">
+    <button id="flip">Flip Camera</button>
+    <button id="mode">Mode: SCRAMBLE</button>
+    <button id="targetMode">096 AI: OFF</button>
+    <button id="nightVision">Night Vision: OFF</button>
+  </div>
+
+  <div id="targetHint" class="hidden">096 AI MODE — automatic detection enabled.</div>
+  <div id="status">Loading face detector…</div>
+  <button id="start">START CAMERA</button>
+</div>
+
+<script type="module">
+import {
+  FaceDetector,
+  FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm";
+
+import {
+  pipeline,
+  env
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
+
+env.allowLocalModels = false;
+
+const video = document.getElementById("camera");
+const canvas = document.getElementById("overlay");
+const ctx = canvas.getContext("2d");
+
+const startBtn = document.getElementById("start");
+const flipBtn = document.getElementById("flip");
+const modeBtn = document.getElementById("mode");
+const statusEl = document.getElementById("status");
+const bootEl = document.getElementById("boot");
+const bootText = document.getElementById("bootText");
+const hazardFlash = document.getElementById("hazardFlash");
+const targetModeBtn = document.getElementById("targetMode");
+const nightVisionBtn = document.getElementById("nightVision");
+const targetHint = document.getElementById("targetHint");
+
+const modes = ["BLACKOUT", "PIXELATE", "SCRAMBLE"];
+
+let detector = null;
+let stream = null;
+let facingMode = "environment";
+let modeIndex = 2;
+let target096Mode = false;
+let nightVisionOn = false;
+let target096 = null;
+let previousHazardCount = 0;
+let lastHazardFlash = 0;
+
+let ai096 = null;
+let ai096Loading = false;
+let ai096Ready = false;
+let ai096Busy = false;
+let ai096LastRun = 0;
+let ai096TrackedDetection = null;
+let ai096LastPositive = 0;
+let ai096LastFaceSignature = "";
+let ai096NewFacePending = false;
+let ai096LastFaceSeenAt = 0;
+
+const AI096_INTERVAL_MS = 2800;
+const AI096_KEEP_MS = 4200;
+const AI096_THRESHOLD = 0.56;
+
+const AI096_LABELS = [
+  "SCP-096, a pale skinny humanoid monster with an elongated white face and dark eyes",
+  "a normal ordinary human face"
+];
+let running = false;
+let lastVideoTime = -1;
+let lastDetections = [];
+let lastDetectMs = 0;
+let audioCtx = null;
+let scrambleGain = null;
+let scrambleOsc = null;
+let noiseSource = null;
+let noiseGain = null;
+let audioUnlocked = false;
+let scrambleAudioOn = false;
+let activeSoundMode = -1;
+let modeTone = null;
+let modeToneGain = null;
+
+function initAudio() {
+  if (audioUnlocked) return;
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  audioCtx = new AudioContextClass();
+
+  scrambleGain = audioCtx.createGain();
+  scrambleGain.gain.value = 0.0;
+  scrambleGain.connect(audioCtx.destination);
+
+  // Harsh electronic carrier.
+  scrambleOsc = audioCtx.createOscillator();
+  scrambleOsc.type = "square";
+  scrambleOsc.frequency.value = 220;
+
+  const oscGain = audioCtx.createGain();
+  oscGain.gain.value = 0.035;
+  scrambleOsc.connect(oscGain);
+  oscGain.connect(scrambleGain);
+  scrambleOsc.start();
+
+  // White noise layer.
+  const bufferSize = audioCtx.sampleRate * 2;
+  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  noiseSource = audioCtx.createBufferSource();
+  noiseSource.buffer = noiseBuffer;
+  noiseSource.loop = true;
+
+  noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0.065;
+
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = "bandpass";
+  noiseFilter.frequency.value = 1800;
+  noiseFilter.Q.value = 0.8;
+
+  noiseSource.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(scrambleGain);
+  noiseSource.start();
+
+  // Second oscillator used to give each censor mode its own character.
+  modeTone = audioCtx.createOscillator();
+  modeTone.type = "sine";
+  modeTone.frequency.value = 110;
+
+  modeToneGain = audioCtx.createGain();
+  modeToneGain.gain.value = 0;
+
+  modeTone.connect(modeToneGain);
+  modeToneGain.connect(audioCtx.destination);
+  modeTone.start();
+
+  audioUnlocked = true;
+}
+
+function setScrambleAudio(enabled) {
+  if (!audioUnlocked || !audioCtx || !scrambleGain) return;
+
+  if (enabled && !scrambleAudioOn) {
+    scrambleAudioOn = true;
+    scrambleGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    scrambleGain.gain.setTargetAtTime(0.85, audioCtx.currentTime, 0.015);
+  } else if (!enabled && scrambleAudioOn) {
+    scrambleAudioOn = false;
+    scrambleGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    scrambleGain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.03);
+  }
+
+  if (enabled && scrambleOsc) {
+    // Jitter the pitch to keep it unstable.
+    scrambleOsc.frequency.setValueAtTime(
+      150 + Math.random() * 420,
+      audioCtx.currentTime
+    );
+  }
+}
+
+
+
+const bootLines = [
+  "SCP FOUNDATION // VISUAL COGNITOHAZARD COUNTERMEASURE",
+  "",
+  "SCRAMBLE OPTICAL FILTER .......... ONLINE",
+  "CAMERA LINK ...................... STANDBY",
+  "FACE CLASSIFIER .................. LOADING",
+  "COGNITOHAZARD RESPONSE ........... ARMED",
+  "AUDIO DISTORTION MODULE .......... ARMED",
+  "096 ZERO-SHOT AI CLASSIFIER ....... AVAILABLE",
+  "",
+  "SYSTEM READY"
+];
+
+async function runBootSequence() {
+  bootText.textContent = "";
+  for (const line of bootLines) {
+    bootText.textContent += line + "\n";
+    await new Promise(r => setTimeout(r, line ? 110 : 65));
+  }
+  await new Promise(r => setTimeout(r, 350));
+  bootEl.classList.add("hidden");
+}
+
+function flashHazard() {
+  const now = performance.now();
+  if (now - lastHazardFlash < 650) return;
+  lastHazardFlash = now;
+
+  hazardFlash.classList.add("show");
+  setTimeout(() => hazardFlash.classList.remove("show"), 180);
+}
+
+function status(text) {
+  statusEl.textContent = text;
+}
+
+async function loadDetector() {
+  try {
+    status("Loading SCRAMBLE detector…");
+
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+
+    detector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite",
+        delegate: "CPU"
+      },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.5,
+      minSuppressionThreshold: 0.3
+    });
+
+    status("Detector ready. Press START CAMERA.");
+  } catch (err) {
+    console.error(err);
+    status("Detector failed to load. Check your internet connection and reload.");
+  }
+}
+
+function setModeAudio(enabled, mode) {
+  if (!audioUnlocked || !audioCtx || !modeTone || !modeToneGain) return;
+
+  // SCRAMBLE keeps its dedicated static/noise generator.
+  setScrambleAudio(enabled && mode === 2);
+
+  if (!enabled || mode === 2) {
+    modeToneGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    modeToneGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.025);
+    activeSoundMode = enabled && mode === 2 ? 2 : -1;
+    return;
+  }
+
+  activeSoundMode = mode;
+  modeToneGain.gain.cancelScheduledValues(audioCtx.currentTime);
+
+  if (mode === 0) {
+    // BLACKOUT: low warning drone / electrical hum.
+    modeTone.type = "sawtooth";
+    modeTone.frequency.setValueAtTime(72 + Math.random() * 8, audioCtx.currentTime);
+    modeToneGain.gain.setTargetAtTime(0.035, audioCtx.currentTime, 0.03);
+  } else if (mode === 1) {
+    // PIXELATE: higher digital buzz whose pitch jitters frame to frame.
+    modeTone.type = "square";
+    modeTone.frequency.setValueAtTime(420 + Math.random() * 260, audioCtx.currentTime);
+    modeToneGain.gain.setTargetAtTime(0.022, audioCtx.currentTime, 0.02);
+  }
+}
+
+async function load096AI() {
+  if (ai096Ready || ai096Loading) return;
+
+  ai096Loading = true;
+  targetModeBtn.textContent = "096 AI: LOADING";
+  status("096 AI — downloading model. First load can take a while…");
+
+  try {
+    ai096 = await pipeline(
+      "zero-shot-image-classification",
+      "Xenova/clip-vit-base-patch32",
+      { dtype: "q8" }
+    );
+    ai096Ready = true;
+    targetModeBtn.textContent = target096Mode ? "096 AI: ON" : "096 AI: OFF";
+    status(target096Mode ? "096 AI ARMED — fast first-scan + low-lag tracking" : "096 AI ready");
+  } catch (err) {
+    console.error(err);
+    targetModeBtn.textContent = "096 AI: ERROR";
+    status("096 AI failed to load. Reload and check your internet connection.");
+  } finally {
+    ai096Loading = false;
+  }
+}
+
+function cropFaceForAI(detection) {
+  if (!detection?.boundingBox || !video.videoWidth) return null;
+
+  const b = detection.boundingBox;
+  const padX = b.width * 0.55;
+  const padY = b.height * 0.65;
+
+  const sx = Math.max(0, b.originX - padX);
+  const sy = Math.max(0, b.originY - padY);
+  const sw = Math.min(video.videoWidth - sx, b.width + padX * 2);
+  const sh = Math.min(video.videoHeight - sy, b.height + padY * 2);
+
+  const crop = document.createElement("canvas");
+  crop.width = 160;
+  crop.height = 160;
+  const c = crop.getContext("2d", { alpha: false });
+
+  c.fillStyle = "black";
+  c.fillRect(0, 0, 160, 160);
+
+  const scale = Math.max(160 / sw, 160 / sh);
+  const dw = sw * scale;
+  const dh = sh * scale;
+
+  c.drawImage(
+    video, sx, sy, sw, sh,
+    (160 - dw) / 2, (160 - dh) / 2, dw, dh
+  );
+
+  return crop.toDataURL("image/jpeg", 0.68);
+}
+
+function nearestToPrevious(detections) {
+  if (!ai096TrackedDetection?.boundingBox || !detections.length) return null;
+
+  const old = getCenter(ai096TrackedDetection.boundingBox);
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const d of detections) {
+    if (!d.boundingBox) continue;
+    const dist = distance(old, getCenter(d.boundingBox));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = d;
+    }
+  }
+
+  const s = Math.max(
+    ai096TrackedDetection.boundingBox.width,
+    ai096TrackedDetection.boundingBox.height
+  );
+
+  if (best && bestDist < Math.max(170, s * 1.8)) {
+    ai096TrackedDetection = best;
+    return best;
+  }
+  return null;
+}
+
+async function classify096(detection) {
+  if (!ai096Ready || ai096Busy || !detection) return;
+
+  const img = cropFaceForAI(detection);
+  if (!img) return;
+
+  ai096Busy = true;
+
+  try {
+    const result = await ai096(img, AI096_LABELS);
+    const scp = result.find(x => x.label === AI096_LABELS[0])?.score ?? 0;
+    const human = result.find(x => x.label === AI096_LABELS[1])?.score ?? 0;
+
+    if (scp >= AI096_THRESHOLD && scp > human) {
+      ai096TrackedDetection = detection;
+      ai096LastPositive = performance.now();
+      flashHazard();
+      status(`TARGET-096 AI MATCH — ${(scp * 100).toFixed(0)}% — SCRAMBLE ACTIVE`);
+    }
+  } catch (err) {
+    console.warn("096 AI error:", err);
+  } finally {
+    ai096Busy = false;
+  }
+}
+
+function ai096VisibleDetections() {
+  if (!target096Mode) return lastDetections;
+  if (!ai096Ready) return [];
+
+  if (performance.now() - ai096LastPositive < AI096_KEEP_MS) {
+    const tracked = nearestToPrevious(lastDetections);
+    if (tracked) return [tracked];
+  }
+  return [];
+}
+
+
+function currentFaceSignature() {
+  if (!lastDetections.length) return "";
+
+  const d = lastDetections[0];
+  if (!d?.boundingBox) return "";
+
+  const b = d.boundingBox;
+
+  // Coarse buckets: enough to notice a new face entering without reacting
+  // to every tiny tracking movement.
+  const cx = Math.round((b.originX + b.width / 2) / 90);
+  const cy = Math.round((b.originY + b.height / 2) / 90);
+  const size = Math.round(Math.max(b.width, b.height) / 80);
+
+  return `${cx}:${cy}:${size}`;
+}
+
+function update096FaceArrivalState(nowMs) {
+  const signature = currentFaceSignature();
+
+  if (!signature) {
+    // After the view has been face-free for a short moment, the next face
+    // gets an immediate AI scan.
+    if (nowMs - ai096LastFaceSeenAt > 450) {
+      ai096LastFaceSignature = "";
+    }
+    return;
+  }
+
+  ai096LastFaceSeenAt = nowMs;
+
+  if (signature !== ai096LastFaceSignature) {
+    ai096LastFaceSignature = signature;
+    ai096NewFacePending = true;
+  }
+}
+
+async function maybeRun096AI(nowMs) {
+  if (!target096Mode || !ai096Ready || ai096Busy) return;
+
+  update096FaceArrivalState(nowMs);
+
+  if (!lastDetections.length) return;
+
+  const immediateCheck = ai096NewFacePending;
+
+  // New face: classify right away.
+  // Existing face: only refresh occasionally.
+  if (!immediateCheck && nowMs - ai096LastRun < AI096_INTERVAL_MS) {
+    return;
+  }
+
+  ai096NewFacePending = false;
+  ai096LastRun = nowMs;
+
+  let candidate = nearestToPrevious(lastDetections);
+  if (!candidate) candidate = lastDetections[0];
+
+  await classify096(candidate);
+}
+
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+window.addEventListener("resize", resizeCanvas);
+window.addEventListener("orientationchange", () => {
+  setTimeout(resizeCanvas, 200);
+});
+resizeCanvas();
+
+async function startCamera() {
+  initAudio();
+  if (audioCtx && audioCtx.state === "suspended") {
+    try { await audioCtx.resume(); } catch {}
+  }
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      status("Camera API unavailable. Open this page in Safari over HTTPS.");
+      return;
+    }
+
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+
+    status("Requesting camera access…");
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+
+    video.srcObject = stream;
+    await video.play();
+
+    startBtn.classList.add("hidden");
+    running = true;
+    lastVideoTime = -1;
+    lastDetections = [];
+    status(detector ? "SCRAMBLE active." : "Camera active — detector still loading…");
+
+    requestAnimationFrame(renderLoop);
+  } catch (err) {
+    console.error(err);
+
+    if (err.name === "NotAllowedError") {
+      status("Camera permission denied. In iPhone Settings → Safari → Camera, allow access, then reload.");
+    } else {
+      status("Camera error: " + (err.message || err));
+    }
+
+    startBtn.classList.remove("hidden");
+  }
+}
+
+function displayTransform() {
+  const vw = video.videoWidth || 1;
+  const vh = video.videoHeight || 1;
+  const cw = canvas.clientWidth;
+  const ch = canvas.clientHeight;
+
+  // Mirrors CSS object-fit: cover.
+  const scale = Math.max(cw / vw, ch / vh);
+  const drawnW = vw * scale;
+  const drawnH = vh * scale;
+
+  return {
+    scale,
+    offsetX: (cw - drawnW) / 2,
+    offsetY: (ch - drawnH) / 2
+  };
+}
+
+function expandedBox(box) {
+  const px = box.width * 0.22;
+  const py = box.height * 0.28;
+
+  return {
+    originX: box.originX - px,
+    originY: box.originY - py,
+    width: box.width + px * 2,
+    height: box.height + py * 2
+  };
+}
+
+function toScreenBox(box) {
+  const tr = displayTransform();
+  const b = expandedBox(box);
+
+  return {
+    x: b.originX * tr.scale + tr.offsetX,
+    y: b.originY * tr.scale + tr.offsetY,
+    w: b.width * tr.scale,
+    h: b.height * tr.scale
+  };
+}
+
+function blackout(box) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.985)";
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+
+  ctx.strokeStyle = "#ff3030";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+
+  ctx.fillStyle = "#ff3030";
+  ctx.font = "bold 12px monospace";
+  ctx.fillText("VISUAL HAZARD", box.x + 6, Math.max(14, box.y - 5));
+  ctx.restore();
+}
+
+function pixelate(box) {
+  if (!video.videoWidth) return;
+
+  const tr = displayTransform();
+
+  const sourceX = (box.x - tr.offsetX) / tr.scale;
+  const sourceY = (box.y - tr.offsetY) / tr.scale;
+  const sourceW = box.w / tr.scale;
+  const sourceH = box.h / tr.scale;
+
+  const small = document.createElement("canvas");
+  const sctx = small.getContext("2d");
+
+  small.width = Math.max(8, Math.floor(box.w / 18));
+  small.height = Math.max(8, Math.floor(box.h / 18));
+
+  try {
+    sctx.drawImage(
+      video,
+      sourceX, sourceY, sourceW, sourceH,
+      0, 0, small.width, small.height
+    );
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      small,
+      0, 0, small.width, small.height,
+      box.x, box.y, box.w, box.h
+    );
+    ctx.fillStyle = "rgba(255,0,0,.10)";
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.strokeStyle = "#ff3030";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(box.x, box.y, box.w, box.h);
+    ctx.restore();
+  } catch {
+    blackout(box);
+  }
+}
+
+function scramble(box) {
+  ctx.save();
+
+  // Hard blackout base with flicker.
+  const flicker = Math.random();
+  ctx.fillStyle = flicker > 0.82 ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.97)";
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+
+  // Dense scanlines.
+  for (let y = box.y; y < box.y + box.h; y += 4) {
+    ctx.fillStyle = Math.random() > 0.5
+      ? "rgba(255,255,255,.10)"
+      : "rgba(255,0,0,.12)";
+    ctx.fillRect(box.x, y, box.w, 1);
+  }
+
+  // Violent horizontal tearing.
+  const slices = 30;
+  for (let i = 0; i < slices; i++) {
+    const sy = box.y + (i / slices) * box.h;
+    const sh = Math.max(1, box.h / slices);
+    const shift = (Math.random() - 0.5) * box.w * 0.75;
+    const barW = box.w * (0.45 + Math.random() * 0.55);
+
+    ctx.fillStyle =
+      Math.random() > 0.78
+        ? "rgba(255,255,255,.58)"
+        : "rgba(255,0,0,.38)";
+
+    ctx.fillRect(
+      box.x + shift,
+      sy,
+      barW,
+      Math.max(1, sh * (0.25 + Math.random() * 0.75))
+    );
+  }
+
+  // Random blocks / digital garbage.
+  for (let i = 0; i < 42; i++) {
+    const rw = 3 + Math.random() * box.w * 0.45;
+    const rh = 2 + Math.random() * 10;
+    const rx = box.x + Math.random() * Math.max(1, box.w - rw);
+    const ry = box.y + Math.random() * box.h;
+
+    const r = Math.random();
+    ctx.fillStyle =
+      r > 0.7
+        ? "rgba(255,255,255,.58)"
+        : r > 0.35
+        ? "rgba(255,0,0,.52)"
+        : "rgba(0,0,0,.9)";
+
+    ctx.fillRect(rx, ry, rw, rh);
+  }
+
+  // Central distortion streaks.
+  for (let i = 0; i < 8; i++) {
+    const y = box.y + Math.random() * box.h;
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+    ctx.fillRect(
+      box.x - Math.random() * box.w * 0.15,
+      y,
+      box.w * (0.7 + Math.random() * 0.5),
+      1 + Math.random() * 3
+    );
+  }
+
+  // Occasionally invert the whole censored area with a bright flash.
+  if (Math.random() > 0.93) {
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+  }
+
+  ctx.strokeStyle = "#ff3030";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+
+  ctx.fillStyle = "#ff3030";
+  ctx.font = "bold 12px monospace";
+  ctx.fillText("SCRAMBLE ACTIVE", box.x + 6, Math.max(14, box.y - 5));
+
+  ctx.restore();
+}
+
+
+function getCenter(box) {
+  return {
+    x: box.originX + box.width / 2,
+    y: box.originY + box.height / 2
+  };
+}
+
+function distance(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function chooseTracked096(detections) {
+  if (!target096 || !detections.length) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const detection of detections) {
+    if (!detection.boundingBox) continue;
+    const c = getCenter(detection.boundingBox);
+    const d = distance(c, target096.center);
+
+    if (d < bestDist) {
+      bestDist = d;
+      best = detection;
+    }
+  }
+
+  if (best && bestDist < Math.max(180, target096.size * 2.2)) {
+    const b = best.boundingBox;
+    target096 = {
+      center: getCenter(b),
+      size: Math.max(b.width, b.height)
+    };
+    return best;
+  }
+
+  return null;
+}
+
+function visibleDetections() {
+  if (!target096Mode) return lastDetections;
+  return ai096VisibleDetections();
+}
+
+function drawDetections() {
+  for (const detection of visibleDetections()) {
+    if (!detection.boundingBox) continue;
+
+    const box = toScreenBox(detection.boundingBox);
+
+    if (modeIndex === 0) blackout(box);
+    else if (modeIndex === 1) pixelate(box);
+    else scramble(box);
+  }
+}
+
+
+function applyNightVision() {
+  if (nightVisionOn) {
+    video.style.filter =
+      "grayscale(1) sepia(1) hue-rotate(65deg) saturate(6) brightness(1.15) contrast(1.35)";
+    canvas.style.filter =
+      "hue-rotate(65deg) saturate(1.7) brightness(1.1)";
+  } else {
+    video.style.filter = "none";
+    canvas.style.filter = "none";
+  }
+}
+
+function renderLoop(nowMs) {
+  if (!running) return;
+
+  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+  // Limiting detection rate reduces heat / battery usage on phones.
+  if (
+    detector &&
+    video.readyState >= 2 &&
+    video.currentTime !== lastVideoTime &&
+    nowMs - lastDetectMs >= 90
+  ) {
+    try {
+      const result = detector.detectForVideo(video, performance.now());
+      lastDetections = result.detections || [];
+      lastVideoTime = video.currentTime;
+      lastDetectMs = nowMs;
+
+      const activeDetections = visibleDetections();
+      const activeCount = activeDetections.length;
+
+      if (activeCount > 0 && previousHazardCount === 0) {
+        // The face is already being censored in the same render cycle;
+        // this flash is just an additional HUD warning.
+        flashHazard();
+      }
+      previousHazardCount = activeCount;
+
+      if (target096Mode && !target096) {
+        status(lastDetections.length
+          ? "096 AI ARMED — fast first-scan + low-lag tracking"
+          : "096 MODE — waiting for target");
+      } else if (activeCount) {
+        status(target096Mode
+          ? "TARGET-096 ACQUIRED — SCRAMBLE ACTIVE"
+          : `SCRAMBLE ACTIVE — ${activeCount} face${activeCount === 1 ? "" : "s"} censored`);
+      } else {
+        status(target096Mode
+          ? "096 MODE — target not currently visible"
+          : "SCRAMBLE ACTIVE — no face detected");
+      }
+    } catch (err) {
+      console.warn(err);
+    }
+  }
+
+  if (target096Mode) {
+    maybeRun096AI(nowMs);
+  }
+
+  drawDetections();
+
+  const shouldPlayCensorSound =
+    visibleDetections().length > 0 &&
+    running;
+
+  setModeAudio(shouldPlayCensorSound, modeIndex);
+
+  requestAnimationFrame(renderLoop);
+}
+
+
+canvas.style.pointerEvents = "auto";
+
+canvas.addEventListener("click", () => {
+  if (target096Mode) {
+    status(ai096Ready
+      ? "096 AI ARMED — automatic recognition active"
+      : "096 AI is still loading…");
+  }
+});
+
+startBtn.addEventListener("click", startCamera);
+
+flipBtn.addEventListener("click", async () => {
+  facingMode = facingMode === "environment" ? "user" : "environment";
+  running = false;
+  setModeAudio(false, modeIndex);
+  await startCamera();
+});
+
+modeBtn.addEventListener("click", () => {
+  modeIndex = (modeIndex + 1) % modes.length;
+  modeBtn.textContent = "Mode: " + modes[modeIndex];
+  setModeAudio(false, modeIndex);
+});
+
+
+targetModeBtn.addEventListener("click", async () => {
+  target096Mode = !target096Mode;
+  previousHazardCount = 0;
+  ai096TrackedDetection = null;
+  ai096LastFaceSignature = "";
+  ai096NewFacePending = false;
+  ai096LastPositive = 0;
+
+  if (target096Mode) {
+    targetHint.classList.remove("hidden");
+    targetHint.textContent =
+      "096 AI MODE — new faces are checked immediately, then lightweight tracking keeps the censor attached while AI refreshes occasionally.";
+
+    if (!ai096Ready) {
+      await load096AI();
+    } else {
+      targetModeBtn.textContent = "096 AI: ON";
+      status("096 AI ARMED — fast first-scan + low-lag tracking");
+    }
+  } else {
+    targetModeBtn.textContent = "096 AI: OFF";
+    targetHint.classList.add("hidden");
+    status("SCRAMBLE ACTIVE — normal face censorship");
+  }
+});
+
+nightVisionBtn.addEventListener("click", () => {
+  nightVisionOn = !nightVisionOn;
+  nightVisionBtn.textContent = "Night Vision: " + (nightVisionOn ? "ON" : "OFF");
+  applyNightVision();
+});
+
+loadDetector();
+runBootSequence();
+</script>
+</body>
+</html>
