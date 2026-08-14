@@ -74,6 +74,8 @@ const S19 = {
     const state = this.load();
     state.personnel = null;
     state.clearance = 0;
+    localStorage.removeItem("site19_o5_authorized");
+    localStorage.removeItem("site19_o5_personnel");
     this.save(state);
   },
 

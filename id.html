@@ -152,6 +152,18 @@ function showCredential(raw){
 
     startLocalSession(personnel);
 
+    if (clearanceLevel >= 5) {
+      localStorage.setItem("site19_o5_authorized", "1");
+      localStorage.setItem("site19_o5_personnel", JSON.stringify({
+        name,
+        division,
+        credentialId
+      }));
+    } else {
+      localStorage.removeItem("site19_o5_authorized");
+      localStorage.removeItem("site19_o5_personnel");
+    }
+
     authenticated=true;
     running=false;
 
