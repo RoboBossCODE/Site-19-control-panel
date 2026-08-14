@@ -1,0 +1,258 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Site-19 Personnel Scanner</title>
+<style>
+:root{--bg:#050807;--line:#2d6b4b;--text:#d7e4db;--muted:#81958a;--accent:#7df9a8;--gold:#ffdc64}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#050807;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+body{background:linear-gradient(rgba(125,249,168,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(125,249,168,.02) 1px,transparent 1px),#050807;background-size:24px 24px}
+.shell{max-width:900px;margin:auto;padding:18px}.topbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.brand{font-size:clamp(20px,5vw,32px);font-weight:900;letter-spacing:.1em;color:var(--accent)}.sub,.small{color:var(--muted);font-size:12px}
+a{color:inherit;text-decoration:none}.badge,.btn{border:1px solid var(--line);background:#09110d;padding:9px 11px;color:#e7fff0;font:inherit;border-radius:4px}
+.section{border:1px solid #1d3d2e;background:#08100d;margin-top:14px;padding:14px}.section h2{margin:0 0 10px;color:#b9ffd0;font-size:14px}
+.camera{position:relative;width:100%;aspect-ratio:3/4;max-height:70vh;background:#000;border:1px solid #234b38;overflow:hidden}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}canvas{pointer-events:none}
+.reticle{position:absolute;left:12%;right:12%;top:28%;bottom:28%;border:2px solid rgba(125,249,168,.8);box-shadow:0 0 20px rgba(125,249,168,.2);pointer-events:none}
+.status{padding:9px 10px;border-left:3px solid var(--line);background:#07110c;font-size:12px;margin-top:10px}
+.result{background:#030604;border:1px solid #183527;padding:12px;white-space:pre-wrap;font-size:12px;min-height:120px}
+.input{width:100%;padding:10px;background:#050a07;border:1px solid #28503d;color:#e9fff0;font:inherit}.row{display:flex;gap:8px;flex-wrap:wrap}
+.auth{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="shell">
+ <div class="topbar">
+   <div><div class="brand">PERSONNEL ID SCANNER</div><div class="sub">SITE-19 OPTICAL CREDENTIAL READER // LOCAL AUTHENTICATION</div></div>
+   <a class="badge" href="index.html">← CONTROL PANEL</a>
+ </div>
+
+ <div class="camera">
+   <video id="video" autoplay muted playsinline></video>
+   <canvas id="overlay"></canvas>
+   <div class="reticle"></div>
+ </div>
+
+ <div class="section">
+   <div class="row">
+     <button class="btn" id="start">START SCANNER</button>
+     <button class="btn" id="flip">FLIP CAMERA</button>
+   </div>
+   <div class="status" id="status">SCANNER OFFLINE</div>
+   <p class="small">After a valid scan, your session is stored only on this device and you are returned to the dashboard.</p>
+ </div>
+
+ <div class="section">
+   <h2>IDENTITY RESULT</h2>
+   <div class="result" id="result">NO CREDENTIAL PRESENT</div>
+ </div>
+
+ <div class="section">
+   <h2>MANUAL DIAGNOSTIC INPUT</h2>
+   <input id="manual" class="input" placeholder="SITE19|NAME|DIVISION|O5|S19-O5-0001">
+   <button id="parse" class="btn" style="margin-top:8px">PARSE CREDENTIAL</button>
+ </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d",{willReadFrequently:true});
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
+const startBtn = document.getElementById("start");
+const flipBtn = document.getElementById("flip");
+const parseBtn = document.getElementById("parse");
+const manualInput = document.getElementById("manual");
+
+let stream=null, running=false, facing="environment", lastRaw="", lastScan=0, authenticated=false;
+
+
+const SITE19_KEY = "site19_state_v1";
+
+function clearanceNumberLocal(text) {
+  const value = String(text || "").trim().toUpperCase();
+  if (value === "O5" || value === "05" || value.includes("O5")) return 5;
+  const match = value.match(/([1-4])/);
+  return match ? Number(match[1]) : 0;
+}
+
+function clearanceNameLocal(level) {
+  level = Number(level) || 0;
+  if (level >= 5) return "O5";
+  if (level <= 0) return "GUEST";
+  return "LEVEL " + level;
+}
+
+function startLocalSession(personnel) {
+  let state = {
+    clearance: 0,
+    emergency: "NORMAL",
+    alerts: [],
+    personnel: null
+  };
+
+  try {
+    state = Object.assign(
+      state,
+      JSON.parse(localStorage.getItem(SITE19_KEY) || "{}")
+    );
+  } catch {}
+
+  state.personnel = personnel;
+  state.clearance = Number(personnel.clearanceLevel) || 0;
+  state.alerts = Array.isArray(state.alerts) ? state.alerts : [];
+
+  state.alerts.unshift({
+    time: new Date().toISOString(),
+    msg: `Personnel authenticated locally: ${personnel.name} // ${clearanceNameLocal(personnel.clearanceLevel)}`,
+    severity: "SECURITY"
+  });
+
+  state.alerts = state.alerts.slice(0, 60);
+  localStorage.setItem(SITE19_KEY, JSON.stringify(state));
+}
+
+function showCredential(raw){
+  if(authenticated || raw===lastRaw) return;
+  lastRaw=raw;
+
+  try {
+    const p=String(raw).split("|");
+
+    if(p[0]!=="SITE19" || p.length<4){
+      resultEl.textContent="UNRECOGNIZED QR CREDENTIAL\n\nRAW DATA:\n"+raw;
+      statusEl.textContent="QR READ // CREDENTIAL FORMAT INVALID";
+      setTimeout(()=>lastRaw="",1200);
+      return;
+    }
+
+    const name=(p[1]||"").trim();
+    const division=(p[2]||"").trim();
+    const clearanceText=(p[3]||"").trim().toUpperCase();
+    const credentialId=(p[4]||"UNREGISTERED").trim();
+    const clearanceLevel=clearanceNumberLocal(clearanceText);
+
+    if(!name || !division || clearanceLevel===0){
+      resultEl.textContent="CREDENTIAL REJECTED\n\nINVALID PERSONNEL DATA";
+      statusEl.textContent="AUTHENTICATION FAILED";
+      setTimeout(()=>lastRaw="",1200);
+      return;
+    }
+
+    const personnel = {
+      name,
+      division,
+      clearanceText,
+      clearanceLevel,
+      credentialId
+    };
+
+    startLocalSession(personnel);
+
+    authenticated=true;
+    running=false;
+
+    resultEl.textContent=
+`PERSONNEL IDENTIFIED
+
+NAME: ${name}
+DIVISION: ${division}
+CLEARANCE: ${clearanceNameLocal(clearanceLevel)}
+CREDENTIAL: ${credentialId}
+
+STATUS: AUTHORIZED
+LOCAL SITE-19 SESSION STARTED`;
+
+    statusEl.innerHTML=`<span class="auth">ACCESS GRANTED // RETURNING TO CONTROL PANEL</span>`;
+
+    if(navigator.vibrate) navigator.vibrate([70,40,70]);
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+
+    setTimeout(()=>location.href="index.html",900);
+
+  } catch (err) {
+    console.error("Credential processing failed:", err);
+    authenticated=false;
+    lastRaw="";
+    statusEl.textContent="CREDENTIAL PROCESSING ERROR // RETRYING";
+  }
+}
+async function startScanner(){
+  try{
+    if(typeof jsQR!=="function"){
+      statusEl.textContent="QR DECODER FAILED TO LOAD // CHECK INTERNET";
+      return;
+    }
+
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:720}},
+      audio:false
+    });
+
+    video.srcObject=stream;
+    await video.play();
+    authenticated=false;
+    running=true;
+    statusEl.textContent="OPTICAL QR SCANNER ONLINE // SEARCHING";
+    requestAnimationFrame(scanLoop);
+  }catch(e){
+    statusEl.textContent="CAMERA ERROR // "+e.message;
+  }
+}
+
+function scanLoop(now){
+  if(!running) return;
+  requestAnimationFrame(scanLoop);
+
+  if(now-lastScan<100) return;
+  lastScan=now;
+  if(video.readyState<2 || !video.videoWidth) return;
+
+  const maxW=640;
+  const scale=Math.min(1,maxW/video.videoWidth);
+  overlay.width=Math.round(video.videoWidth*scale);
+  overlay.height=Math.round(video.videoHeight*scale);
+
+  ctx.drawImage(video,0,0,overlay.width,overlay.height);
+  const img=ctx.getImageData(0,0,overlay.width,overlay.height);
+
+  const code=jsQR(img.data,img.width,img.height,{inversionAttempts:"attemptBoth"});
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+
+  if(code){
+    ctx.strokeStyle="#7df9a8";
+    ctx.lineWidth=4;
+    const L=code.location;
+    ctx.beginPath();
+    ctx.moveTo(L.topLeftCorner.x,L.topLeftCorner.y);
+    ctx.lineTo(L.topRightCorner.x,L.topRightCorner.y);
+    ctx.lineTo(L.bottomRightCorner.x,L.bottomRightCorner.y);
+    ctx.lineTo(L.bottomLeftCorner.x,L.bottomLeftCorner.y);
+    ctx.closePath();
+    ctx.stroke();
+    showCredential(code.data);
+  }else{
+    statusEl.textContent="OPTICAL QR SCANNER ONLINE // SEARCHING";
+  }
+}
+
+startBtn.addEventListener("click", startScanner);
+
+flipBtn.addEventListener("click", async () => {
+  facing = facing === "environment" ? "user" : "environment";
+  await startScanner();
+});
+
+parseBtn.addEventListener("click", () => {
+  lastRaw = "";
+  authenticated = false;
+  showCredential(manualInput.value.trim());
+});
+</script>
+</body>
+</html>
