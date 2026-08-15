@@ -1,21 +1,32 @@
-SITE-19 BACKEND TRANSITION PACK
+SITE-19 AUTOMATIC BACKEND PACK
 
-Upload/replace these files in the root of your GitHub Pages repository:
+1) APPS SCRIPT:
+Replace the entire Code.gs with the included Code.gs.
+Save it.
+Then Deploy > Manage deployments > Edit (pencil) > New version > Deploy.
+Keep Execute as: Me
+Keep access: Anyone
 
-- id.html
+IMPORTANT: editing Code.gs alone does NOT update the live /exec deployment until you deploy a new version.
+
+2) GITHUB:
+Upload/replace:
 - index.html
-- credential_fabricator_o5_v10_backend.html
+- id.html
+- credential_fabricator_o5_v11_auto.html
 - site19.js
 - styles.css
 
-Keep your existing public and L4/O5 app HTML files.
+Keep all your other existing app HTML files.
 
-After upload:
-1. Open id.html
-2. Tap BACKEND SETTINGS
-3. Paste your Apps Script Web App /exec URL
-4. Save it
-5. Scan your new backend O5 card
+HOW IT WORKS:
+- Scanner automatically calls:
+  https://script.google.com/macros/s/AKfycby8D8HsOIAMlaQm6sIq-JEeUefZyvdleREYJN8jKeFBkfdOmreUhvoC__kZGPgm2UCpHw/exec
+- Valid backend card -> server returns clearance + a 15-minute backend session.
+- O5 opens Credential Fabricator.
+- Choose clearance and press ISSUE BACKEND CREDENTIAL.
+- Backend verifies the O5 session, generates the random credential token, stores it privately, and returns it.
+- Fabricator automatically puts S19TOKEN|<token> into the QR.
+- Names/photos are never sent to the backend by these files.
 
-The Apps Script URL is stored locally in that browser.
-O5 is only granted by backend verification of an S19TOKEN credential.
+Your existing manually-registered bootstrap O5 token remains valid.
